@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "OwlHacks 2026",
+    "slug": "owlhacks-2026",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "mobile",
+    "userInterfaceStyle": "automatic",
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
