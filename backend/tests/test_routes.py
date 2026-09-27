@@ -87,6 +87,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(route["id"], "route-1")
         self.assertEqual(route["coordinates"][0], PAYLOAD["start"])
         self.assertEqual(route["metrics"]["durationMinutes"], 10)
+        self.assertIsNone(route["metrics"]["distanceMiles"])
         self.assertEqual(route["metrics"]["airQualityIndex"], 42)
         self.assertIn("2026-09-26T12:00", route["metrics"]["snowCondition"])
         self.assertIsNone(route["metrics"]["treeCanopyCoveragePercent"])
@@ -184,6 +185,7 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(routes[0]["isPreferred"])
         self.assertEqual(routes[0]["rank"], 1)
         self.assertEqual(routes[0]["metrics"]["durationMinutes"], 10.0)
+        self.assertEqual(routes[0]["metrics"]["distanceMiles"], 0.62)
 
         # Route 2 is alternative
         self.assertEqual(routes[1]["id"], "route-2")
@@ -191,6 +193,7 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(routes[1]["isPreferred"])
         self.assertEqual(routes[1]["rank"], 2)
         self.assertEqual(routes[1]["metrics"]["durationMinutes"], 12.0)
+        self.assertEqual(routes[1]["metrics"]["distanceMiles"], 0.71)
 
         # Route 3 is alternative
         self.assertEqual(routes[2]["id"], "route-3")
@@ -198,6 +201,7 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(routes[2]["isPreferred"])
         self.assertEqual(routes[2]["rank"], 3)
         self.assertEqual(routes[2]["metrics"]["durationMinutes"], 14.0)
+        self.assertEqual(routes[2]["metrics"]["distanceMiles"], 0.81)
 
     def test_ranking_preserves_each_routes_weather_and_exposure(self):
         self.multi_routes = True

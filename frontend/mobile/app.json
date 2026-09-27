@@ -1,11 +1,14 @@
 {
   "expo": {
-    "name": "OwlHacks 2026",
-    "slug": "owlhacks-2026",
+    "name": "Weather Walk",
+    "slug": "Weather Walk",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
     "plugins": [
       "expo-router"
     ],

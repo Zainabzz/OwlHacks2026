@@ -4,11 +4,20 @@ import assert from 'node:assert/strict';
 process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8000/';
 const { getRoutes } = await import('../src/services/routing.js');
 const { suggestPlaces, retrievePlace, createSearchSession } = await import('../src/services/search.js');
+const { formatDuration } = await import('../src/services/formatting.js');
 const originalFetch = globalThis.fetch;
 after(() => { globalThis.fetch = originalFetch; });
 const start = { latitude: 39.9496, longitude: -75.1719 };
 const end = { latitude: 39.9524, longitude: -75.1636 };
 const route = { id: 'route-1', coordinates: [start, end], metrics: { temperatureC: 20 } };
+
+test('formats route times as minutes or hours and minutes', () => {
+  assert.equal(formatDuration(59), '59 min');
+  assert.equal(formatDuration(60), '1 hr');
+  assert.equal(formatDuration(61.4), '1 hr 1 min');
+  assert.equal(formatDuration(125), '2 hrs 5 min');
+  assert.equal(formatDuration(null), 'Not available');
+});
 
  test('posts resolved coordinates to backend and preserves shared route metrics', async () => {
   globalThis.fetch = async (url, options) => {

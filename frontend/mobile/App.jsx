@@ -94,7 +94,7 @@ export default function App() {
       />
 
       <View style={styles.header}>
-        <Logo color={theme.primary} size={46} />
+        <Logo size={46} />
 
         <TouchableOpacity
           onPress={() => setIsDark(!isDark)}

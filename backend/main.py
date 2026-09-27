@@ -24,6 +24,8 @@ load_dotenv(Path(__file__).with_name(".env"))
 app = FastAPI(title="OwlRoute API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 MAPBOX_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
+# A slightly conservative pace narrows the gap with real-world walking times.
+MAPBOX_WALKING_SPEED_MPS = 1.30
 
 class Point(BaseModel):
     latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
@@ -139,11 +141,11 @@ def route_similarity(coords_a, coords_b):
     union = len(set_a | set_b)
     return intersection / union if union > 0 else 1.0
 
-
 async def fetch_mapbox_routes(client, start, destination):
     coordinates = f"{start.longitude},{start.latitude};{destination.longitude},{destination.latitude}"
     result = await mapbox_get(client, f"directions/v5/mapbox/walking/{coordinates}", {
         "alternatives": "true", "geometries": "geojson", "overview": "full", "steps": "false",
+        "walking_speed": MAPBOX_WALKING_SPEED_MPS,
     })
     if result.get("code") == "NoRoute":
         return []
@@ -197,7 +199,8 @@ async def fetch_mapbox_routes(client, start, destination):
                 res = await asyncio.wait_for(mapbox_get(
                     client,
                     f"directions/v5/mapbox/walking/{s_lng},{s_lat};{wp_lng:.6f},{wp_lat:.6f};{d_lng},{d_lat}",
-                    {"geometries": "geojson", "overview": "full", "steps": "false"}
+                    {"geometries": "geojson", "overview": "full", "steps": "false",
+                     "walking_speed": MAPBOX_WALKING_SPEED_MPS}
                 ), timeout=3)
                 if res.get("code") == "Ok" and isinstance(res.get("routes"), list) and res["routes"]:
                     candidate = res["routes"][0]
@@ -268,6 +271,8 @@ async def calculate_routes(request: RouteRequest):
             "id": f"route-{index + 1}", "name": f"Route {index + 1}", "coordinates": coordinates,
             "metrics": {
                 "durationMinutes": round(duration / 60, 1) if duration is not None and duration >= 0 else None,
+                "distanceMiles": round(number(route.get("distance")) / 1609.344, 2)
+                if number(route.get("distance")) is not None and number(route.get("distance")) >= 0 else None,
                 "temperatureC": number(weather.get("temperatureC")),
                 "temperatureF": number(weather.get("temperatureF")),
                 "windImpact": None, "airQualityIndex": number(air.get("us_aqi")), "snowCondition": snow,

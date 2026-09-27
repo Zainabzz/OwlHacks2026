@@ -4,6 +4,7 @@ import math
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from pyproj import Transformer
@@ -15,6 +16,19 @@ SOURCE = DATA_DIR / "raw" / "buildings" / "LI_BUILDING_FOOTPRINTS.geojson"
 INDEX = DATA_DIR / "processed" / "buildings.sqlite3"
 PROJECT = Transformer.from_crs("EPSG:4326", "EPSG:32618", always_xy=True).transform
 _BUILD_LOCK = threading.Lock()
+
+
+@contextmanager
+def _connection(path):
+    connection = sqlite3.connect(path)
+    try:
+        yield connection
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def iter_features(path, chunk_size=1024 * 1024):
@@ -98,7 +112,7 @@ def build_index(source=SOURCE, index=INDEX):
     count = skipped = 0
     max_height = 0.0
     try:
-        with sqlite3.connect(temporary) as connection:
+        with _connection(temporary) as connection:
             connection.execute("PRAGMA journal_mode=OFF")
             connection.execute("PRAGMA synchronous=OFF")
             connection.execute("CREATE TABLE buildings (id INTEGER PRIMARY KEY, geometry BLOB NOT NULL, height_m REAL)")
@@ -163,7 +177,7 @@ def _metadata(connection):
 
 
 def read_metadata(index):
-    with sqlite3.connect(index) as connection:
+    with _connection(index) as connection:
         return _metadata(connection)
 
 
@@ -175,7 +189,7 @@ def ensure_index(source=SOURCE, index=INDEX):
     with _BUILD_LOCK:
         fresh = False
         try:
-            with sqlite3.connect(index) as connection:
+            with _connection(index) as connection:
                 metadata = _metadata(connection)
             fresh = metadata.get("source_mtime_ns") == str(stamp) and metadata.get("source_size") == str(size)
         except (OSError, sqlite3.Error):
@@ -191,7 +205,7 @@ def index_is_current(source, index):
         return False
     stamp, size = _source_stamp(source)
     try:
-        with sqlite3.connect(index) as connection:
+        with _connection(index) as connection:
             metadata = _metadata(connection)
         return metadata.get("source_mtime_ns") == str(stamp) and metadata.get("source_size") == str(size)
     except sqlite3.Error:
@@ -203,7 +217,7 @@ def query(index, bounds):
     import shapely
 
     min_x, min_y, max_x, max_y = bounds
-    with sqlite3.connect(index) as connection:
+    with _connection(index) as connection:
         metadata = _metadata(connection)
         rows = connection.execute(
             "SELECT b.geometry, b.height_m FROM bounds r JOIN buildings b USING(id) "

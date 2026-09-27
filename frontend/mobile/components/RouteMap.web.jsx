@@ -2,6 +2,7 @@ import React from "react";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { ROUTE_COLORS, DARK_ROUTE_COLORS} from "../src/services/routing";
+import { formatDuration } from "../src/services/formatting";
 
 function FitRoutes({ start, end, routes }) {
   const map = useMap();
@@ -38,7 +39,7 @@ function RouteLine({ route, color, isSelected, isPreferred, onSelectRoute }) {
       pathOptions={{ color, weight: isSelected ? 8 : 5, opacity: isSelected ? 1 : .65, lineJoin: "round", lineCap: "round" }}
       eventHandlers={{ click: () => onSelectRoute(route.id) }}>
       <Tooltip sticky>
-        {route.name}{isPreferred ? " (Preferred)" : ""}{Number.isFinite(route.metrics?.durationMinutes) ? ` · ${route.metrics.durationMinutes} min` : ""}
+        {route.name}{isPreferred ? " (Preferred)" : ""}{Number.isFinite(route.metrics?.durationMinutes) ? ` · ${formatDuration(route.metrics.durationMinutes)}` : ""}{Number.isFinite(route.metrics?.distanceMiles) ? ` · ${route.metrics.distanceMiles.toFixed(2)} mi` : ""}
       </Tooltip>
     </Polyline>
   );

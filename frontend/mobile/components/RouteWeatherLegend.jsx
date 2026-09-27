@@ -11,13 +11,19 @@ import {
   ROUTE_COLORS,
   DARK_ROUTE_COLORS,
 } from "../src/services/routing";
+import { formatDuration } from "../src/services/formatting";
 
 const METRICS = [
   {
     key: "durationMinutes",
     label: "Travel time",
     icon: "◷",
-    unit: "min",
+  },
+  {
+    key: "distanceMiles",
+    label: "Distance",
+    icon: "↔",
+    unit: " mi",
   },
   {
     key: "sunExposurePercent",
@@ -73,6 +79,8 @@ function formatMetric(metric, value) {
   }
 
   if (typeof value === "number") {
+    if (metric.key === "durationMinutes") return formatDuration(value);
+    if (metric.key === "distanceMiles") return `${value.toFixed(2)} mi`;
     return `${Math.round(value * 10) / 10}${metric.unit || ""}`;
   }
 
@@ -227,7 +235,7 @@ export default function RouteWeatherLegend({
                   key={route.id}
                   onPress={() => onSelectRoute(route.id)}
                   accessibilityRole="button"
-                  accessibilityLabel={`${route.name}${isPreferred ? ", preferred route" : ""}${route.metrics?.durationMinutes ? `, ${route.metrics.durationMinutes} minutes` : ""}`}
+                  accessibilityLabel={`${route.name}${isPreferred ? ", preferred route" : ""}${route.metrics?.durationMinutes != null ? `, ${formatDuration(route.metrics.durationMinutes)}` : ""}${Number.isFinite(route.metrics?.distanceMiles) ? `, ${route.metrics.distanceMiles.toFixed(2)} miles` : ""}`}
                   style={[
                     styles.routeChip,
                     {
@@ -293,7 +301,7 @@ export default function RouteWeatherLegend({
                           marginTop: 2,
                         }}
                       >
-                        {route.metrics.durationMinutes} min
+                        {formatDuration(route.metrics.durationMinutes)}
                       </Text>
                     )}
                   </View>
