@@ -69,7 +69,7 @@ export default function DestinationSearch({ location, theme, onSelect, onSubmit,
     setSuggestions([]);
     setError("");
     try {
-      const place = await retrievePlace(suggestion.id, session);
+      const place = suggestion.location || await retrievePlace(suggestion.id, session);
       if (version !== generation.current) return;
       setQuery(place.name);
       setSelected(true);

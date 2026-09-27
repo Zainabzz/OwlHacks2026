@@ -69,3 +69,15 @@ test('weather uses backend coordinates and preserves both provider statuses', as
   globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
   await assert.rejects(fetchWeather(start.latitude, start.longitude), /invalid weather/);
 });
+
+
+test('coordinate searches resolve locally and reject invalid coordinate input', async () => {
+  const { parseCoordinateLocation } = await import('../src/services/search.js');
+  globalThis.fetch = async () => { throw new Error('Coordinates should not call a provider'); };
+  const [result] = await suggestPlaces(' 39.95, -75.16 ', createSearchSession());
+  assert.deepEqual(result.location, { latitude: 39.95, longitude: -75.16, name: '39.95, -75.16' });
+  for (const query of ['91, 0', '0, -181', ', 0', '0,', '0x10, 0', 'Market, Philadelphia', '1, 2, 3']) {
+    assert.equal(parseCoordinateLocation(query), null);
+  }
+  assert.equal(parseCoordinateLocation('0, 0').latitude, 0);
+});

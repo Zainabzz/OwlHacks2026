@@ -10,7 +10,7 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 Set `EXPO_PUBLIC_API_URL=http://<your-computer-LAN-IP>:8000` in `frontend/mobile/.env` for physical devices. A browser on the same computer can use `http://localhost:8000`. Restart Expo after changing the variable: `cd frontend/mobile && npx expo start --clear`.
 
-The homepage requires location permission and a selected search result. Search suggestions and coordinate retrieval are separate backend calls using a shared session token. `/api/routes` accepts `{start: {latitude, longitude}, destination: {latitude, longitude}}` and returns shared route geometry/metrics IDs.
+Choose a starting location and destination from search results on the homepage or route screen. GPS can fill the start, but location permission is optional when entering a start manually. Both fields also accept latitude, longitude coordinates. Search suggestions and coordinate retrieval are separate backend calls using a shared session token. `/api/routes` accepts `{start: {latitude, longitude}, destination: {latitude, longitude}}` and returns shared route geometry/metrics IDs.
 
 Weather and US AQI are starting-area modeled conditions, not measurements on each sidewalk. Optional upstream failures leave environmental metrics null while returning valid directions. Snowfall includes the model time; ice and sidewalk clearance are unknown. Keys and upstream token-bearing URLs are not returned to the client.
 

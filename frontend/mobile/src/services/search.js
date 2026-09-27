@@ -9,7 +9,17 @@ export function createSearchSession() {
   });
 }
 
+export function parseCoordinateLocation(query) {
+  const parts = query.trim().split(",");
+  if (parts.length !== 2 || parts.some(part => !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(part.trim()))) return null;
+  const [latitude, longitude] = parts.map(Number);
+  const point = { latitude, longitude, name: `${latitude}, ${longitude}` };
+  return isValidPoint(point) ? point : null;
+}
+
 export async function suggestPlaces(query, sessionToken, location) {
+  const coordinates = parseCoordinateLocation(query);
+  if (coordinates) return [{ id: "coordinates", name: coordinates.name, description: "Use these coordinates", location: coordinates }];
   const params = new URLSearchParams({ q: query, session_token: sessionToken });
   if (isValidPoint(location)) {
     params.set("latitude", String(location.latitude));
