@@ -61,14 +61,15 @@ export default function RouteMap({
     >
       {routes.map((route, index) => {
         const isSelected = selectedRoute === route.id;
+        const baseColor = routeColors[index % routeColors.length];
 
         return (
           <Polyline
             key={route.id}
             coordinates={route.coordinates}
-            strokeColor={routeColors[index % routeColors.length]}
+            strokeColor={isSelected ? baseColor : baseColor + "A6"}
             strokeWidth={isSelected ? 8 : 5}
-            zIndex={isSelected ? 10 : index + 1}
+            zIndex={isSelected ? 100 : index + 1}
             tappable
             onPress={() => onSelectRoute(route.id)}
           />

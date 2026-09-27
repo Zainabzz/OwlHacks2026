@@ -13,8 +13,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 if __package__:
     from .services.weather import get_weather
+    from .services.route_weather import get_route_weather
+    from .services.exposure import get_route_exposure, apply_shade
 else:
     from services.weather import get_weather
+    from services.route_weather import get_route_weather
+    from services.exposure import get_route_exposure, apply_shade
 
 load_dotenv(Path(__file__).with_name(".env"))
 app = FastAPI(title="OwlRoute API")
@@ -69,15 +73,18 @@ async def suggest_places(
         params["proximity"] = f"{longitude},{latitude}"
     async with httpx.AsyncClient(timeout=15) as client:
         data = await mapbox_get(client, "search/searchbox/v1/suggest", params)
+    suggestions = data.get("suggestions")
+    if not isinstance(suggestions, list):
+        raise HTTPException(502, "Mapbox returned invalid search suggestions. Please try again.")
     return {"suggestions": [
         {"id": item["mapbox_id"], "name": item.get("name", "Destination"),
          "description": item.get("full_address") or item.get("place_formatted", "")}
-        for item in data.get("suggestions", [])
+        for item in suggestions
         if isinstance(item, dict) and item.get("mapbox_id")
     ]}
 
 @app.get("/api/search/retrieve")
-async def retrieve_place(session_token: UUID, id: str = Query(min_length=1, max_length=512)):
+async def retrieve_place(session_token: UUID, id: str = Query(min_length=1, max_length=16384)):
     async with httpx.AsyncClient(timeout=15) as client:
         data = await mapbox_get(client, f"search/searchbox/v1/retrieve/{quote(id, safe='')}",
                                 {"session_token": str(session_token)})
@@ -87,7 +94,7 @@ async def retrieve_place(session_token: UUID, id: str = Query(min_length=1, max_
         point = Point(latitude=latitude, longitude=longitude)
         properties = feature.get("properties", {})
         return {"location": {**point.model_dump(), "name": properties.get("name") or properties.get("full_address") or "Destination"}}
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
         raise HTTPException(502, "The selected place has no usable coordinates") from exc
 
 async def fetch_air_quality(client, point):
@@ -104,6 +111,27 @@ async def fetch_air_quality(client, point):
     except (httpx.HTTPError, ValueError, AttributeError):
         return {}
 
+def validate_route_geometry(route):
+    try:
+        coordinates = [Point(latitude=coord[1], longitude=coord[0]).model_dump()
+                       for coord in route["geometry"]["coordinates"]]
+        if len(coordinates) < 2:
+            raise ValueError("Empty route")
+        return coordinates
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise HTTPException(502, "Mapbox returned invalid route geometry") from exc
+
+
+def route_similarity(coords_a, coords_b):
+    if not coords_a or not coords_b:
+        return 0.0
+    set_a = {(round(c[0] * 5000), round(c[1] * 5000)) for c in coords_a}
+    set_b = {(round(c[0] * 5000), round(c[1] * 5000)) for c in coords_b}
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union > 0 else 1.0
+
+
 async def fetch_mapbox_routes(client, start, destination):
     coordinates = f"{start.longitude},{start.latitude};{destination.longitude},{destination.latitude}"
     result = await mapbox_get(client, f"directions/v5/mapbox/walking/{coordinates}", {
@@ -113,68 +141,167 @@ async def fetch_mapbox_routes(client, start, destination):
         return []
     if result.get("code") != "Ok" or not isinstance(result.get("routes"), list):
         raise HTTPException(502, "Unable to calculate walking routes")
-    return result["routes"]
+
+    primary_routes = result["routes"]
+    for route in primary_routes:
+        validate_route_geometry(route)
+    if not primary_routes:
+        return []
+
+
+    all_routes = list(primary_routes)
+    direct_route = primary_routes[0]
+    direct_dist = number(direct_route.get("distance")) or 0
+
+    s_lat, s_lng = start.latitude, start.longitude
+    d_lat, d_lng = destination.latitude, destination.longitude
+    mid_lat = (s_lat + d_lat) / 2
+    mid_lng = (s_lng + d_lng) / 2
+    dy = (d_lat - s_lat) * 111000
+    dx = (d_lng - s_lng) * 111000 * math.cos(math.radians(mid_lat))
+    dist = math.hypot(dx, dy)
+
+    if len(primary_routes) < 3 and dist >= 30 and abs(math.cos(math.radians(mid_lat))) > 1e-6:
+        perp_x = -dy / dist
+        perp_y = dx / dist
+        base_offset = max(60.0, min(dist * 0.25, 350.0))
+
+        candidates_params = [
+            (0.5, 1.0),
+            (0.5, -1.0),
+            (0.35, 1.2),
+            (0.65, -1.2),
+            (0.35, -1.2),
+            (0.65, 1.2),
+            (0.5, 1.8),
+            (0.5, -1.8),
+        ]
+
+        async def fetch_waypoint_route(frac, factor):
+            f_lat = s_lat + frac * (d_lat - s_lat)
+            f_lng = s_lng + frac * (d_lng - s_lng)
+            off = base_offset * factor
+            wp_lat = f_lat + (perp_y * off) / 111000
+            wp_lng = f_lng + (perp_x * off) / (111000 * math.cos(math.radians(mid_lat)))
+            if not (-90 <= wp_lat <= 90 and -180 <= wp_lng <= 180):
+                return None
+            try:
+                res = await asyncio.wait_for(mapbox_get(
+                    client,
+                    f"directions/v5/mapbox/walking/{s_lng},{s_lat};{wp_lng:.6f},{wp_lat:.6f};{d_lng},{d_lat}",
+                    {"geometries": "geojson", "overview": "full", "steps": "false"}
+                ), timeout=3)
+                if res.get("code") == "Ok" and isinstance(res.get("routes"), list) and res["routes"]:
+                    candidate = res["routes"][0]
+                    validate_route_geometry(candidate)
+                    return candidate
+            except (HTTPException, asyncio.TimeoutError):
+                pass
+            return None
+
+        waypoint_results = await asyncio.gather(*[fetch_waypoint_route(frac, factor) for frac, factor in candidates_params])
+        for r in waypoint_results:
+            if r and isinstance(r, dict) and "geometry" in r and "coordinates" in r["geometry"]:
+                all_routes.append(r)
+
+    unique = [direct_route]
+    remaining = [r for r in all_routes[1:] if (number(r.get("distance")) or 0) <= (direct_dist * 2.2 if direct_dist > 0 else 999999)]
+    remaining.sort(key=lambda r: number(r.get("duration")) if number(r.get("duration")) is not None else math.inf)
+
+    for cand in remaining:
+        cand_coords = cand.get("geometry", {}).get("coordinates", [])
+        is_dup = False
+        for u in unique:
+            u_coords = u.get("geometry", {}).get("coordinates", [])
+            if route_similarity(cand_coords, u_coords) > 0.75:
+                is_dup = True
+                break
+        if not is_dup:
+            unique.append(cand)
+            if len(unique) >= 3:
+                break
+
+    return unique
 
 @app.post("/api/routes")
 async def calculate_routes(request: RouteRequest):
+    generated_at = datetime.now(timezone.utc)
     async with httpx.AsyncClient(timeout=20) as client:
         mapbox_routes = await fetch_mapbox_routes(client, request.start, request.destination)
-        weather, air = await asyncio.gather(
-            get_weather(request.start.latitude, request.start.longitude, client),
+        geometries = [validate_route_geometry(route) for route in mapbox_routes[:3]]
+        route_weather, air, exposures = await asyncio.gather(
+            asyncio.gather(*(get_route_weather(coordinates, client) for coordinates in geometries)),
             fetch_air_quality(client, request.start),
-        ) if mapbox_routes else ({}, {})
+            asyncio.gather(*(get_route_exposure(coordinates, number(route.get("duration")), generated_at, client)
+                             for route, coordinates in zip(mapbox_routes[:3], geometries))),
+        ) if geometries else ([], {}, [])
 
-    snowfall = number(weather.get("snowfallCm"))
-    observed_at = weather.get("weatherTime")
-    snow = None if snowfall is None else f"{snowfall:g} cm snowfall · {observed_at or 'time unavailable'} UTC. Sidewalk ice/clearance unknown."
     routes = []
-    generated_at = datetime.now(timezone.utc)
-    for index, route in enumerate(mapbox_routes[:3]):
-        try:
-            coordinates = [Point(latitude=coord[1], longitude=coord[0]).model_dump()
-                           for coord in route["geometry"]["coordinates"]]
-            if len(coordinates) < 2:
-                raise ValueError("Empty route")
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
-            raise HTTPException(502, "Mapbox returned invalid route geometry") from exc
+    for index, (route, coordinates, weather) in enumerate(zip(mapbox_routes[:3], geometries, route_weather)):
+        snowfall = number(weather.get("snowfallCm"))
+        observed_at = weather.get("weatherTime")
+        snow = None if snowfall is None else f"{snowfall:g} cm average snowfall · {observed_at or 'time unavailable'} UTC. Sidewalk ice/clearance unknown."
         duration = number(route.get("duration"))
         try:
             spatial = await asyncio.to_thread(spatial_metrics, coordinates, duration, generated_at)
         except Exception:
             logging.getLogger(__name__).warning("Spatial estimates unavailable; check local datasets")
             spatial = {}
+        exposure = apply_shade(exposures[index], spatial)
         routes.append({
             "id": f"route-{index + 1}", "name": f"Route {index + 1}", "coordinates": coordinates,
             "metrics": {
                 "durationMinutes": round(duration / 60, 1) if duration is not None and duration >= 0 else None,
                 "temperatureC": number(weather.get("temperatureC")),
+                "temperatureF": number(weather.get("temperatureF")),
                 "windImpact": None, "airQualityIndex": number(air.get("us_aqi")), "snowCondition": snow,
                 "sunExposurePercent": None, "treeCanopyPercent": None,
                 "buildingShadePercent": None, "rainExposurePercent": None,
                 **spatial,
+                **exposure["metrics"],
             },
             "metricContext": {
-                "weatherScope": "Starting-point weather conditions",
+                "weatherScope": "Distance-weighted route average",
                 "weatherTime": observed_at, "weatherSource": weather.get("source"), "airQualityScope": "Estimated US AQI for the starting-point area",
                 "airQualityTime": air.get("time"), "timezone": "UTC",
                 "spatialQuality": "Estimated from local polygon coverage and flat-roof shadows; unavailable outside verified coverage",
                 "spatialTime": generated_at.isoformat(),
             },
+            "exposure": exposure,
+            "weather": weather,
             "sidewalkGuidance": None, "isDemo": False,
         })
+    def compute_score(route):
+        duration = route["metrics"]["durationMinutes"]
+        if duration is None or duration <= 0:
+            return -math.inf
+        metrics = route["metrics"]
+        weather = route["weather"]
+        canopy = number(metrics.get("treeCanopyPercent")) or 0
+        shade = number(metrics.get("buildingShadePercent")) or 0
+        sun = number(metrics.get("sunExposurePercent")) or 0
+        temp = number(weather.get("temperatureC"))
+        wet = any((number(weather.get(key)) or 0) > 0 for key in ("rainMm", "precipitationMm", "snowfallCm"))
+        wet = wet or (number(metrics.get("rainExposurePercent")) or 0) > 0
+        if wet:
+            modifier = 0
+        elif temp is not None and temp >= 20:
+            modifier = (canopy * .20 + shade * .15) / 100
+        elif temp is not None and temp < 10:
+            modifier = sun * .10 / 100
+        else:
+            modifier = (canopy * .15 + shade * .05) / 100
+        return 1000 / duration * (1 + modifier)
+
+    routes.sort(key=compute_score, reverse=True)
+    for index, route in enumerate(routes):
+        route.update(id=f"route-{index + 1}", name=f"Route {index + 1}", rank=index + 1, isPreferred=index == 0)
     return {
         "routes": routes,
-        "weather": {
-            **weather,
-            "temperatureC": number(weather.get("temperatureC")),
-            "precipitationMm": number(weather.get("precipitationMm")),
-            "rainMm": number(weather.get("rainMm")), "snowfallCm": snowfall,
-            "windSpeedKmh": number(weather.get("windSpeedKmh")),
-            "windDirectionDegrees": number(weather.get("windDirectionDegrees")), "observedAt": observed_at,
-        },
+        "weather": routes[0]["weather"] if routes else {},
         "airQuality": {"usAqi": number(air.get("us_aqi")), "observedAt": air.get("time")},
         "generatedAt": generated_at.isoformat(),
-        "weatherScope": "Starting-point weather conditions",
+        "weatherScope": "Distance-weighted route average",
     }
 
 @app.get("/api/weather")

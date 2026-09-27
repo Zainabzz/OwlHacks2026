@@ -81,3 +81,32 @@ test('coordinate searches resolve locally and reject invalid coordinate input', 
   }
   assert.equal(parseCoordinateLocation('0, 0').latitude, 0);
 });
+
+test('supports top 3 ranked routes with preferred and alternative designations', async () => {
+  const routes = [
+    { id: 'route-1', name: 'Route 1', isPreferred: true, rank: 1, coordinates: [start, end], metrics: { durationMinutes: 10 } },
+    { id: 'route-2', name: 'Route 2', isPreferred: false, rank: 2, coordinates: [start, end], metrics: { durationMinutes: 12 } },
+    { id: 'route-3', name: 'Route 3', isPreferred: false, rank: 3, coordinates: [start, end], metrics: { durationMinutes: 14 } },
+  ];
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ routes }) });
+  const result = await getRoutes(start, end);
+  assert.equal(result.length, 3);
+  assert.equal(result[0].isPreferred, true);
+  assert.equal(result[1].isPreferred, false);
+  assert.equal(result[2].isPreferred, false);
+  assert.equal(result[0].rank, 1);
+  assert.equal(result[1].rank, 2);
+  assert.equal(result[2].rank, 3);
+});
+
+
+test('ranked routes retain distinct Fahrenheit averages and exposure data', async () => {
+  const routes = [1, 2, 3].map(rank => ({
+    id: `route-${rank}`, rank, isPreferred: rank === 1, coordinates: [start, end],
+    metrics: { temperatureF: 70 + rank, sunExposurePercent: rank * 10, rainExposurePercent: rank * 20, windImpact: rank },
+    weather: { temperatureF: 70 + rank, coveragePercent: 100 },
+    exposure: { sunBasis: 'open-sky', status: 'ok' },
+  }));
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ routes }) });
+  assert.deepEqual(await getRoutes(start, end), routes);
+});

@@ -44,15 +44,16 @@ const METRICS = [
     unit: "%",
   },
   {
-    key: "temperatureC",
-    label: "Temperature",
+    key: "temperatureF",
+    label: "Average temperature",
     icon: "°",
-    unit: "°C",
+    unit: "°F",
   },
   {
     key: "windImpact",
     label: "Wind impact",
     icon: "≋",
+    unit: " mph",
   },
   {
     key: "airQualityIndex",
@@ -78,7 +79,7 @@ function formatMetric(metric, value) {
   return String(value);
 }
 
-function MetricCard({ metric, value, theme }) {
+function MetricCard({ metric, value, theme, detail }) {
   return (
     <View
       style={[
@@ -114,6 +115,7 @@ function MetricCard({ metric, value, theme }) {
       >
         {formatMetric(metric, value)}
       </Text>
+      {!!detail && <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 6 }}>{detail}</Text>}
     </View>
   );
 }
@@ -144,6 +146,19 @@ export default function RouteWeatherLegend({
     routeColors[Math.max(0, activeIndex) % routeColors.length];
 
   const metrics = activeRoute?.metrics || {};
+  const exposure = activeRoute?.exposure;
+  const exposureDetails = {
+    sunExposurePercent: exposure?.sunBasis === "weather-and-shade" ? "Sunshine estimate with route shade" : "Sunshine estimate · open sky",
+    rainExposurePercent: "Walk in forecast rain · no shelter adjustment",
+    windImpact: "Average headwind · regional estimate",
+  };
+  const metricDetail = key => {
+    if (!exposureDetails[key]) return null;
+    if (exposure?.status === "unsupported") return "Philadelphia routes only";
+    const coverage = exposure?.coveragePercent?.[key];
+    if (coverage === 0) return "Forecast unavailable";
+    return exposureDetails[key] + (coverage > 0 && coverage < 100 ? ` · ${coverage}% forecast coverage` : "");
+  };
 
   return (
     <View
@@ -200,16 +215,20 @@ export default function RouteWeatherLegend({
                 routeColors[index % routeColors.length];
 
               const active = activeRoute?.id === route.id;
+              const isPreferred = route.isPreferred ?? (index === 0);
 
               return (
                 <TouchableOpacity
                   key={route.id}
                   onPress={() => onSelectRoute(route.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${route.name}${isPreferred ? ", preferred route" : ""}${route.metrics?.durationMinutes ? `, ${route.metrics.durationMinutes} minutes` : ""}`}
                   style={[
                     styles.routeChip,
                     {
-                      backgroundColor:
-                        theme.surfaceSecondary,
+                      backgroundColor: active
+                        ? (isDark ? "#1E2D25" : "#E8F5E9")
+                        : theme.surfaceSecondary,
                       borderColor: active
                         ? color
                         : theme.border,
@@ -224,14 +243,55 @@ export default function RouteWeatherLegend({
                     ]}
                   />
 
-                  <Text
-                    style={{
-                      color: theme.text,
-                      fontWeight: active ? "700" : "500",
-                    }}
-                  >
-                    {route.name}
-                  </Text>
+                  <View style={styles.chipTextContainer}>
+                    <View style={styles.chipHeaderRow}>
+                      <Text
+                        style={{
+                          color: theme.text,
+                          fontWeight: active ? "700" : "600",
+                          fontSize: 14,
+                        }}
+                      >
+                        {route.name}
+                      </Text>
+                      {isPreferred && (
+                        <View
+                          style={[
+                            styles.chipBadge,
+                            {
+                              backgroundColor: isDark
+                                ? "#143D27"
+                                : "#C8E6C9",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.chipBadgeText,
+                              {
+                                color: isDark
+                                  ? "#7BE0BF"
+                                  : "#1B5E20",
+                              },
+                            ]}
+                          >
+                            Preferred
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    {route.metrics?.durationMinutes !== null && route.metrics?.durationMinutes !== undefined && (
+                      <Text
+                        style={{
+                          color: theme.textSecondary,
+                          fontSize: 12,
+                          marginTop: 2,
+                        }}
+                      >
+                        {route.metrics.durationMinutes} min
+                      </Text>
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             })}
@@ -270,6 +330,52 @@ export default function RouteWeatherLegend({
                 >
                   {activeRoute.name}
                 </Text>
+
+                {(activeRoute.isPreferred ?? (activeIndex === 0)) ? (
+                  <View
+                    style={[
+                      styles.preferredBadge,
+                      {
+                        backgroundColor: isDark
+                          ? "#143D27"
+                          : "#C8E6C9",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.preferredBadgeText,
+                        {
+                          color: isDark
+                            ? "#7BE0BF"
+                            : "#1B5E20",
+                        },
+                      ]}
+                    >
+                      ★ Preferred Route
+                    </Text>
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      styles.altBadge,
+                      {
+                        backgroundColor: theme.surfaceSecondary,
+                        borderColor: theme.border,
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.altBadgeText,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Alternative {activeIndex}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <View style={styles.metricsGrid}>
@@ -281,6 +387,7 @@ export default function RouteWeatherLegend({
                     <MetricCard
                       metric={metric}
                       value={metrics[metric.key]}
+                      detail={metricDetail(metric.key)}
                       theme={theme}
                     />
                   </View>
@@ -317,11 +424,16 @@ export default function RouteWeatherLegend({
                 </Text>
               </View>
 
+              {exposure && <Text style={[styles.notice, { color: theme.textSecondary }]}>
+                Exposure: Open-Meteo forecast at estimated arrival times, assuming a steady walking pace.
+                {exposure.sunBasis === "open-sky" ? " Sun estimate excludes building and tree shade." : " Sun estimate combines forecast sunshine with average route shade."}
+                {" "}Rain shows the share of the walk in hours with at least 0.1 mm of rain; it is not rain probability. Wind excludes street-level shelter.
+              </Text>}
               {activeRoute.metricContext && (
                 <Text style={[styles.notice, { color: theme.textSecondary }]}>
-                  Weather: starting-point conditions · {activeRoute.metricContext.weatherTime || "unavailable"} UTC.
+                  Weather: route average{activeRoute.weather?.coveragePercent < 100 ? " (partial coverage)" : ""} · {activeRoute.metricContext.weatherTime || "unavailable"} UTC.
                   {"\n"}Area AQI: {activeRoute.metricContext.airQualityTime || "unavailable"} UTC. Sidewalk ice conditions unavailable.
-                  {"\n"}Weather: {activeRoute.metricContext.weatherSource === "openWeather" ? "OpenWeather" : activeRoute.metricContext.weatherSource === "openMeteo" ? "Open-Meteo" : "unavailable"}. Air quality: CAMS via Open-Meteo.
+                  {"\n"}Weather: {activeRoute.metricContext.weatherSource === "openWeather" ? "OpenWeather" : activeRoute.metricContext.weatherSource === "openMeteo" ? "Open-Meteo" : activeRoute.metricContext.weatherSource === "mixed" ? "Open-Meteo / OpenWeather" : "unavailable"}. Air quality: CAMS via Open-Meteo.
                 </Text>
               )}
               <Text
@@ -389,6 +501,27 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
 
+  chipTextContainer: {
+    flexDirection: "column",
+  },
+
+  chipHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  chipBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+
+  chipBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
   routeDot: {
     width: 11,
     height: 11,
@@ -397,6 +530,7 @@ const styles = StyleSheet.create({
 
   activeHeading: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: 10,
     marginBottom: 14,
@@ -406,6 +540,28 @@ const styles = StyleSheet.create({
   activeTitle: {
     fontSize: 17,
     fontWeight: "700",
+  },
+
+  preferredBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+
+  preferredBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  altBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+
+  altBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
 
   metricsGrid: {

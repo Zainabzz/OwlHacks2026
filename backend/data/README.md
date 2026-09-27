@@ -11,4 +11,6 @@ Sources checked:
 
 Calculations use UTM 18N (meters), restricted to the Philadelphia area. Canopy coverage is the route length intersecting the union of canopy polygons. Building shade uses flat-roof prism shadows and 12 arrival-time samples based on route duration. Local building coverage must include the maximum possible shadow reach. Unknown heights or low sun can make shade unavailable. Canopy is a static overhead-coverage estimate; these estimates omit seasonal foliage, cloud cover, terrain, and facade details. At night direct sun is zero when both layers provide coverage.
 
+The weather-based sun card works without these files and is labeled as an open-sky sunshine estimate. Available shade coverage supplies an approximate adjustment to that estimate. Rain exposure reports forecast rainy portions of the walk; it does not claim overhead protection.
+
 Rain shelter and sidewalk-side advice remain unavailable: they need actual overhead shelter and sidewalk geometry. Do not interpret a building shadow as rain protection.
