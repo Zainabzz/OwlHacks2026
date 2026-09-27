@@ -27,13 +27,13 @@ const METRICS = [
   },
   {
     key: "treeCanopyPercent",
-    label: "Tree canopy",
+    label: "Tree canopy coverage",
     icon: "♧",
     unit: "%",
   },
   {
     key: "buildingShadePercent",
-    label: "Building shade",
+    label: "Estimated building shade",
     icon: "▥",
     unit: "%",
   },
@@ -153,6 +153,11 @@ export default function RouteWeatherLegend({
     windImpact: "Average headwind · regional estimate",
   };
   const metricDetail = key => {
+    if (key === "treeCanopyPercent") return "Unavailable: tree locations do not include canopy outlines.";
+    if (key === "buildingShadePercent") {
+      if (exposure?.spatialStatus === "nighttime") return "No direct sun at estimated arrival time; building shade is not applicable.";
+      return "Estimated from Philadelphia footprints and approximate heights using a flat-roof shadow model.";
+    }
     if (!exposureDetails[key]) return null;
     if (exposure?.status === "unsupported") return "Philadelphia routes only";
     const coverage = exposure?.coveragePercent?.[key];
@@ -386,7 +391,9 @@ export default function RouteWeatherLegend({
                   >
                     <MetricCard
                       metric={metric}
-                      value={metrics[metric.key]}
+                      value={metric.key === "buildingShadePercent" && exposure?.spatialStatus === "nighttime"
+                        ? "Nighttime"
+                        : metrics[metric.key]}
                       detail={metricDetail(metric.key)}
                       theme={theme}
                     />
@@ -424,11 +431,13 @@ export default function RouteWeatherLegend({
                 </Text>
               </View>
 
-              {exposure && <Text style={[styles.notice, { color: theme.textSecondary }]}>
+              {exposure && (
+                <Text style={[styles.notice, { color: theme.textSecondary }]}>
                 Exposure: Open-Meteo forecast at estimated arrival times, assuming a steady walking pace.
-                {exposure.sunBasis === "open-sky" ? " Sun estimate excludes building and tree shade." : " Sun estimate combines forecast sunshine with average route shade."}
+                {exposure.sunBasis === "open-sky" ? " Sun estimate excludes building and tree shade." : " Sun estimate combines forecast sunshine with modeled building shade; tree canopy data is unavailable."}
                 {" "}Rain shows the share of the walk in hours with at least 0.1 mm of rain; it is not rain probability. Wind excludes street-level shelter.
-              </Text>}
+                </Text>
+              )}
               {activeRoute.metricContext && (
                 <Text style={[styles.notice, { color: theme.textSecondary }]}>
                   Weather: route average{activeRoute.weather?.coveragePercent < 100 ? " (partial coverage)" : ""} · {activeRoute.metricContext.weatherTime || "unavailable"} UTC.

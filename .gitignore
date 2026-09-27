@@ -1,4 +1,8 @@
 backend/.env
 backend/.venv/
 __pycache__/
+backend/data/processed/
 frontend/mobile/.env
+
+# Downloaded Philadelphia geospatial datasets
+backend/data/raw/

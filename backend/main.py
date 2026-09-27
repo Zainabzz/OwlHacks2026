@@ -40,6 +40,14 @@ def spatial_metrics(coordinates, duration, departure):
         from spatial import route_metrics
     return route_metrics(coordinates, duration, departure)
 
+def route_spatial_status(coordinates, duration, departure):
+    if __package__:
+        from .spatial import route_is_nighttime
+    else:
+        from spatial import route_is_nighttime
+    nighttime = route_is_nighttime(coordinates, duration, departure)
+    return "nighttime" if nighttime is True else "daytime" if nighttime is False else "unavailable"
+
 def number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
 
@@ -248,6 +256,14 @@ async def calculate_routes(request: RouteRequest):
             logging.getLogger(__name__).warning("Spatial estimates unavailable; check local datasets")
             spatial = {}
         exposure = apply_shade(exposures[index], spatial)
+        exposure["spatialStatus"] = route_spatial_status(coordinates, duration, generated_at)
+        exposure["limitations"] = [
+            "The downloaded 2025 tree inventory contains trunk points, not crown outlines; tree canopy coverage is unavailable.",
+            "Building shade uses approximate footprint heights and a flat-roof shadow model; it is an estimate, not a sidewalk-level measurement.",
+            "Total shade is unavailable because current tree canopy polygons were not supplied.",
+        ]
+        if exposure["spatialStatus"] == "nighttime":
+            exposure["limitations"].append("Estimated arrival samples are after sunset; building shade is not applicable.")
         routes.append({
             "id": f"route-{index + 1}", "name": f"Route {index + 1}", "coordinates": coordinates,
             "metrics": {
@@ -256,15 +272,19 @@ async def calculate_routes(request: RouteRequest):
                 "temperatureF": number(weather.get("temperatureF")),
                 "windImpact": None, "airQualityIndex": number(air.get("us_aqi")), "snowCondition": snow,
                 "sunExposurePercent": None, "treeCanopyPercent": None,
+                "treeCanopyCoveragePercent": None,
                 "buildingShadePercent": None, "rainExposurePercent": None,
+                "estimatedShadePercent": None,
                 **spatial,
                 **exposure["metrics"],
+                "treeCanopyCoveragePercent": number(spatial.get("treeCanopyPercent")),
+                "estimatedShadePercent": None,
             },
             "metricContext": {
                 "weatherScope": "Distance-weighted route average",
                 "weatherTime": observed_at, "weatherSource": weather.get("source"), "airQualityScope": "Estimated US AQI for the starting-point area",
                 "airQualityTime": air.get("time"), "timezone": "UTC",
-                "spatialQuality": "Estimated from local polygon coverage and flat-roof shadows; unavailable outside verified coverage",
+                "spatialQuality": "Philadelphia building footprints indexed in UTM 18N; approximate-height flat-roof shadow model. Tree canopy unavailable because supplied tree files contain points and geometry-free change summaries, not canopy polygons.",
                 "spatialTime": generated_at.isoformat(),
             },
             "exposure": exposure,

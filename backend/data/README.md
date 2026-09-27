@@ -1,16 +1,35 @@
-# Optional spatial data
+# Philadelphia spatial data
 
-The API reads `buildings.geojson` and `tree_canopy.geojson` here and caches them by modification time. Missing, invalid, or out-of-coverage datasets yield null spatial metrics. No data is downloaded during a routing request.
+The repository contains these source files under `backend/data/raw/buildings/`:
 
-Each file must be a WGS84 GeoJSON FeatureCollection with a top-level `coverageBbox: [west, south, east, north]` identifying the **complete surveyed/extracted area**, not just the bounds of its polygons. Geometries must be valid Polygon or MultiPolygon features. Building properties require a finite positive `height_m`. Preserve source, collection date, and attribution in top-level metadata. An empty dataset must not stand in for unavailable coverage.
+- `LI_BUILDING_FOOTPRINTS.geojson` is a 474 MB GeoJSON FeatureCollection in OGC:CRS84 (longitude/latitude). It contains Polygon building footprints and `approx_hgt` and `max_hgt` values in feet. The backend uses only positive finite `approx_hgt` values, converted to meters; it never treats `base_elevation` as height.
+- `trees/ppr_tree_inventory_2025.geojson` is a GeoJSON point inventory in OGC:CRS84. It includes species, trunk diameter (`tree_dbh`), and year, but no crown outlines or tree heights.
+- `trees/TreeCanopyChange_2008_2018.csv` has class, area, and length fields but no geometry. Its gain/loss categories do not describe current canopy.
 
-Sources checked:
+**Tree canopy percentage is therefore unavailable.** Tree points and a geometry-free gain/loss table cannot support route canopy coverage or tree shade. The API returns null for canopy coverage and explains why. Add a current canopy polygon dataset with known coverage before reporting that metric; do not infer crown extents from trunk points.
 
-- [Philadelphia Building Footprints](https://opendataphilly.org/datasets/building-footprints/) and [current layer schema](https://services.arcgis.com/fLeGjb7u4uXqeF9q/ArcGIS/rest/services/Building_Footprints/FeatureServer/0). The layer exposes `approx_hgt` and `max_hgt`; measurements are feet. Convert a verified positive height to meters with `height_m = approx_hgt * 0.3048`. Do not use `base_elevation` as building height. Unknown heights stay unknown.
-- [PPR Tree Canopy](https://opendataphilly.org/datasets/ppr-tree-canopy/). The 2015 canopy **outlines** describe crown extent and have LiDAR-derived heights. Tree points alone cannot represent canopy area. The 2008–2018 change layer includes lost canopy; it cannot be used unfiltered as current canopy.
+## Building index
 
-Calculations use UTM 18N (meters), restricted to the Philadelphia area. Canopy coverage is the route length intersecting the union of canopy polygons. Building shade uses flat-roof prism shadows and 12 arrival-time samples based on route duration. Local building coverage must include the maximum possible shadow reach. Unknown heights or low sun can make shade unavailable. Canopy is a static overhead-coverage estimate; these estimates omit seasonal foliage, cloud cover, terrain, and facade details. At night direct sun is zero when both layers provide coverage.
+The backend streams the large building source into a local SQLite RTree index in `backend/data/processed/buildings.sqlite3`, reprojecting features to EPSG:32618 (UTM 18N) and converting `approx_hgt` from feet to meters. The processed directory is generated, ignored by Git, and never sent to the mobile client. The index is reused until the source file changes. Invalid source records are skipped during indexing; the supplied file currently has one skipped record, so routes near an omitted feature may have additional uncertainty.
 
-The weather-based sun card works without these files and is labeled as an open-sky sunshine estimate. Available shade coverage supplies an approximate adjustment to that estimate. Rain exposure reports forecast rainy portions of the walk; it does not claim overhead protection.
+The project launcher builds or refreshes the index before starting the API:
 
-Rain shelter and sidewalk-side advice remain unavailable: they need actual overhead shelter and sidewalk geometry. Do not interpret a building shadow as rain protection.
+```sh
+sh backend/start.sh --reload
+```
+
+You may also prepare it separately:
+
+```sh
+backend/.venv/bin/python -m backend.spatial.buildings
+```
+
+This one-time pass reads the full source file. Each route analysis then queries only nearby building footprints using the spatial index. If the source file or index is missing, stale, or unreadable, routes still return and spatial metrics remain unavailable.
+
+## Metric meaning and limits
+
+Building shade uses 12 arrival-time samples along the route and flat-roof prism shadows from mapped footprint geometry and approximate building heights. The resulting building shade is an estimate, not a sidewalk-level measurement; it omits facade shape, terrain, street furniture, and height error. Unknown nearby heights, low sun, or a shadow corridor beyond the downloaded footprint extent make the estimate unavailable. Invalid source records are skipped and may cause added uncertainty if near a route.
+
+Sun exposure combines the arrival-time Open-Meteo open-sky sunshine estimate with the modeled building shade when building analysis is available. The tree inventory is not used to claim canopy or shade. Total route shade remains unavailable until current canopy polygons are supplied. Cloud cover remains a weather metric; clouds do not alter geometric building shade. Rain exposure does not account for overhead shelter. The Philadelphia operating area is limited to longitude -75.30 to -74.95 and latitude 39.85 to 40.15.
+
+Sources: [Philadelphia Building Footprints](https://opendataphilly.org/datasets/building-footprints/), [PPR Tree Inventory](https://opendataphilly.org/datasets/ppr-tree-inventory/), [PPR Tree Canopy](https://opendataphilly.org/datasets/ppr-tree-canopy/).

@@ -33,7 +33,7 @@ Choose a starting location and destination from search results on the homepage o
 
 Weather is a distance-weighted current-condition average from five equally spaced samples along each route geometry (endpoints have half weight). Each route includes its own `weather` object, provider averages, sample counts, and coverage percentage. Missing samples are excluded and shown as partial coverage; a complete outage leaves temperatures null. Temperature is displayed in Fahrenheit. US AQI remains a starting-area estimate. These are not measurements on each sidewalk or arrival-time forecasts. Optional upstream failures leave environmental metrics null while returning valid directions. Snowfall includes the model time; ice and sidewalk clearance are unknown. Keys and upstream token-bearing URLs are not returned to the client.
 
-See [spatial data setup](data/README.md) for optional canopy and building layers. Live GPS progress and ElevenLabs voice are deferred as described in the supplied plan.
+See [spatial data setup](data/README.md) for the Philadelphia building index, the limitations of the supplied tree datasets, and exposure metric assumptions. The launcher builds or refreshes the optional building index before starting. Live GPS progress and ElevenLabs voice are deferred as described in the supplied plan.
 
 Run isolated API/spatial tests (no provider credentials or live API calls required):
 

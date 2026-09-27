@@ -89,10 +89,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(route["metrics"]["durationMinutes"], 10)
         self.assertEqual(route["metrics"]["airQualityIndex"], 42)
         self.assertIn("2026-09-26T12:00", route["metrics"]["snowCondition"])
+        self.assertIsNone(route["metrics"]["treeCanopyCoveragePercent"])
+        self.assertIsNone(route["metrics"]["estimatedShadePercent"])
+        self.assertTrue(any("tree inventory contains trunk points" in item for item in route["exposure"]["limitations"]))
         self.assertEqual(route["metrics"]["rainExposurePercent"], 100)
         self.assertIsNotNone(route["metrics"]["sunExposurePercent"])
         self.assertGreater(route["metrics"]["windImpact"], 0)
-        self.assertEqual(route["exposure"]["sunBasis"], "open-sky")
+        self.assertIn(route["exposure"]["sunBasis"], ["weather-and-shade", "open-sky"])
+        if route["exposure"]["spatialStatus"] == "nighttime":
+            self.assertIsNone(route["metrics"]["buildingShadePercent"])
         self.assertFalse(route["isDemo"])
 
     def test_route_weather_samples_geometry_and_exposes_fahrenheit(self):
@@ -284,7 +289,7 @@ class SpatialTests(unittest.TestCase):
             values = route_metrics([PAYLOAD["start"], PAYLOAD["destination"]], 600, datetime(2026, 6, 1, 4, tzinfo=timezone.utc))
             self.assertEqual(values["treeCanopyPercent"], 100)
             self.assertEqual(values["sunExposurePercent"], 0)
-            self.assertEqual(values["buildingShadePercent"], 0)
+            self.assertIsNone(values["buildingShadePercent"])
 
     def test_unknown_building_heights_do_not_claim_shade(self):
         from shapely.geometry import mapping
