@@ -1,5 +1,6 @@
 """Philadelphia route exposure estimates from arrival-time Open-Meteo forecasts."""
 import asyncio
+import logging
 import math
 from bisect import bisect_left
 from datetime import timedelta
@@ -14,10 +15,12 @@ if __package__ == "backend.services":
     from ..spatial import PROJECT, UNPROJECT
 else:
     from spatial import PROJECT, UNPROJECT
-from .weather import OPEN_METEO_URL, PROVIDER_TIMEOUT, numeric
+from .weather import OPEN_METEO_URL, numeric
 
 FIELDS = "direct_normal_irradiance,rain,showers,wind_speed_10m,wind_direction_10m"
 EMPTY = {"sunExposurePercent": None, "rainExposurePercent": None, "windImpact": None}
+EXPOSURE_TIMEOUT = 15.0
+LOGGER = logging.getLogger(__name__)
 
 
 def sample_route(coordinates, duration, departure):
@@ -107,16 +110,33 @@ async def get_route_exposure(coordinates, duration, departure, client):
         "end_hour": (samples[-1]["arrival"] + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M"),
     }
     try:
-        response = await asyncio.wait_for(client.get(OPEN_METEO_URL, params=params, timeout=PROVIDER_TIMEOUT), PROVIDER_TIMEOUT)
+        response = await asyncio.wait_for(
+            client.get(OPEN_METEO_URL, params=params, timeout=EXPOSURE_TIMEOUT),
+            EXPOSURE_TIMEOUT,
+        )
         response.raise_for_status()
         payloads = response.json()
         if not isinstance(payloads, list) or len(payloads) != len(samples):
             raise ValueError("Invalid forecast response")
-        return summarize(samples, payloads)
-    except (httpx.HTTPError, asyncio.TimeoutError, ValueError, TypeError, AttributeError):
-        result = summarize(samples, [{} for _ in samples])
-        result["message"] = "Exposure forecast unavailable. Please try again."
+        result = summarize(samples, payloads)
+        if result["status"] == "unavailable":
+            result["message"] = "Forecast returned no usable hourly data."
         return result
+    except httpx.HTTPStatusError as exc:
+        LOGGER.warning("Route exposure forecast returned HTTP %s", exc.response.status_code)
+        message = f"Forecast provider returned HTTP {exc.response.status_code}."
+    except (httpx.TimeoutException, asyncio.TimeoutError):
+        LOGGER.warning("Route exposure forecast timed out")
+        message = "Forecast provider timed out."
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Route exposure forecast connection failed (%s)", type(exc).__name__)
+        message = "Unable to connect to the forecast provider."
+    except (ValueError, TypeError, AttributeError):
+        LOGGER.warning("Route exposure forecast response was invalid")
+        message = "Forecast provider returned invalid data."
+    result = summarize(samples, [{} for _ in samples])
+    result["message"] = message
+    return result
 
 
 def apply_shade(exposure, spatial):

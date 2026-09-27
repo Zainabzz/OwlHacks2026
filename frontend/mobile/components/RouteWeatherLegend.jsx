@@ -32,10 +32,10 @@ const METRICS = [
     unit: "%",
   },
   {
-    key: "treeCanopyPercent",
-    label: "Tree canopy coverage",
+    key: "mappedTreeCount",
+    label: "Mapped trees near route",
     icon: "♧",
-    unit: "%",
+    unit: " trees",
   },
   {
     key: "buildingShadePercent",
@@ -161,15 +161,18 @@ export default function RouteWeatherLegend({
     windImpact: "Average headwind · regional estimate",
   };
   const metricDetail = key => {
-    if (key === "treeCanopyPercent") return "Unavailable: tree locations do not include canopy outlines.";
+    if (key === "mappedTreeCount") return "2025 Philadelphia tree inventory points within 10 m of the route; this is not canopy coverage.";
     if (key === "buildingShadePercent") {
       if (exposure?.spatialStatus === "nighttime") return "No direct sun at estimated arrival time; building shade is not applicable.";
       return "Estimated from Philadelphia footprints and approximate heights using a flat-roof shadow model.";
     }
     if (!exposureDetails[key]) return null;
+    if (key === "sunExposurePercent" && exposure?.sunBasis === "solar-geometry") {
+      return "Sun position and modeled building shade; forecast cloud conditions unavailable.";
+    }
     if (exposure?.status === "unsupported") return "Philadelphia routes only";
     const coverage = exposure?.coveragePercent?.[key];
-    if (coverage === 0) return "Forecast unavailable";
+    if (coverage === 0) return exposure?.message || "Forecast unavailable";
     return exposureDetails[key] + (coverage > 0 && coverage < 100 ? ` · ${coverage}% forecast coverage` : "");
   };
 
@@ -442,7 +445,11 @@ export default function RouteWeatherLegend({
               {exposure && (
                 <Text style={[styles.notice, { color: theme.textSecondary }]}>
                 Exposure: Open-Meteo forecast at estimated arrival times, assuming a steady walking pace.
-                {exposure.sunBasis === "open-sky" ? " Sun estimate excludes building and tree shade." : " Sun estimate combines forecast sunshine with modeled building shade; tree canopy data is unavailable."}
+                {exposure.sunBasis === "solar-geometry"
+                  ? " Sun uses solar geometry and modeled building shade because the forecast is unavailable; cloud conditions are not included."
+                  : exposure.sunBasis === "open-sky"
+                    ? " Sun estimate excludes building and tree shade."
+                    : " Sun estimate combines forecast sunshine with modeled building shade; tree canopy data is unavailable."}
                 {" "}Rain shows the share of the walk in hours with at least 0.1 mm of rain; it is not rain probability. Wind excludes street-level shelter.
                 </Text>
               )}

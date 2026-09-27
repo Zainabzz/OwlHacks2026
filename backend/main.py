@@ -259,14 +259,24 @@ async def calculate_routes(request: RouteRequest):
             logging.getLogger(__name__).warning("Spatial estimates unavailable; check local datasets")
             spatial = {}
         exposure = apply_shade(exposures[index], spatial)
-        exposure["spatialStatus"] = route_spatial_status(coordinates, duration, generated_at)
+        spatial_status = route_spatial_status(coordinates, duration, generated_at)
+        exposure["spatialStatus"] = spatial_status
+        if exposure["metrics"].get("sunExposurePercent") is None:
+            geometric_sun = number(spatial.get("sunExposurePercent"))
+            if geometric_sun is None and spatial_status == "nighttime":
+                geometric_sun = 0.0
+            if geometric_sun is not None:
+                exposure["metrics"]["sunExposurePercent"] = geometric_sun
+                exposure["sunBasis"] = "solar-geometry"
         exposure["limitations"] = [
-            "The downloaded 2025 tree inventory contains trunk points, not crown outlines; tree canopy coverage is unavailable.",
-            "Building shade uses approximate footprint heights and a flat-roof shadow model; it is an estimate, not a sidewalk-level measurement.",
-            "Total shade is unavailable because current tree canopy polygons were not supplied.",
+            "Mapped-tree counts use 2025 inventory points within 10 meters of the route; they do not estimate canopy coverage or tree shade.",
+            "Building shade uses approximate footprint heights, falling back to maximum heights where needed; unknown-height buildings are omitted and may make the estimate low.",
+            "Tree canopy coverage and tree shade are unavailable because the inventory contains points, not canopy outlines.",
         ]
         if exposure["spatialStatus"] == "nighttime":
             exposure["limitations"].append("Estimated arrival samples are after sunset; building shade is not applicable.")
+        if exposure["sunBasis"] == "solar-geometry":
+            exposure["limitations"].append("Sun exposure uses solar position and modeled building shade because forecast data was unavailable; cloud conditions are not included.")
         routes.append({
             "id": f"route-{index + 1}", "name": f"Route {index + 1}", "coordinates": coordinates,
             "metrics": {
@@ -278,6 +288,7 @@ async def calculate_routes(request: RouteRequest):
                 "windImpact": None, "airQualityIndex": number(air.get("us_aqi")), "snowCondition": snow,
                 "sunExposurePercent": None, "treeCanopyPercent": None,
                 "treeCanopyCoveragePercent": None,
+                "mappedTreeCount": number(spatial.get("mappedTreeCount")),
                 "buildingShadePercent": None, "rainExposurePercent": None,
                 "estimatedShadePercent": None,
                 **spatial,
@@ -289,7 +300,7 @@ async def calculate_routes(request: RouteRequest):
                 "weatherScope": "Distance-weighted route average",
                 "weatherTime": observed_at, "weatherSource": weather.get("source"), "airQualityScope": "Estimated US AQI for the starting-point area",
                 "airQualityTime": air.get("time"), "timezone": "UTC",
-                "spatialQuality": "Philadelphia building footprints indexed in UTM 18N; approximate-height flat-roof shadow model. Tree canopy unavailable because supplied tree files contain points and geometry-free change summaries, not canopy polygons.",
+                "spatialQuality": "Philadelphia building footprints indexed in UTM 18N; shade uses approximate height with max-height fallback and omits buildings without heights. Mapped tree counts use the 2025 Philadelphia inventory within 10 meters of the route; canopy outlines are unavailable. If hourly forecast data is unavailable, sun exposure falls back to solar geometry and modeled building shade.",
                 "spatialTime": generated_at.isoformat(),
             },
             "exposure": exposure,

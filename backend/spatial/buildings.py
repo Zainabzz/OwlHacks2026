@@ -16,6 +16,7 @@ SOURCE = DATA_DIR / "raw" / "buildings" / "LI_BUILDING_FOOTPRINTS.geojson"
 INDEX = DATA_DIR / "processed" / "buildings.sqlite3"
 PROJECT = Transformer.from_crs("EPSG:4326", "EPSG:32618", always_xy=True).transform
 _BUILD_LOCK = threading.Lock()
+HEIGHT_METHOD = "approx_hgt_then_max_hgt_v1"
 
 
 @contextmanager
@@ -95,10 +96,12 @@ def _source_stamp(path):
 
 
 def _height_m(properties):
-    feet = properties.get("approx_hgt")
-    if isinstance(feet, bool) or not isinstance(feet, (int, float)) or not math.isfinite(feet) or feet <= 0:
-        return None
-    return feet * 0.3048
+    for key in ("approx_hgt", "max_hgt"):
+        feet = properties.get(key)
+        if isinstance(feet, bool) or not isinstance(feet, (int, float)) or not math.isfinite(feet) or feet <= 0:
+            continue
+        return feet * 0.3048
+    return None
 
 
 def build_index(source=SOURCE, index=INDEX):
@@ -152,6 +155,7 @@ def build_index(source=SOURCE, index=INDEX):
                 "source_size": str(size), "feature_count": str(count),
                 "skipped_count": str(skipped), "crs": "EPSG:32618",
                 "max_height_m": str(max_height),
+                "height_method": HEIGHT_METHOD,
                 "coverage": json.dumps(coverage),
             }
             connection.executemany("INSERT INTO metadata(key, value) VALUES (?, ?)", metadata.items())
@@ -191,7 +195,9 @@ def ensure_index(source=SOURCE, index=INDEX):
         try:
             with _connection(index) as connection:
                 metadata = _metadata(connection)
-            fresh = metadata.get("source_mtime_ns") == str(stamp) and metadata.get("source_size") == str(size)
+            fresh = (metadata.get("source_mtime_ns") == str(stamp)
+                     and metadata.get("source_size") == str(size)
+                     and metadata.get("height_method") == HEIGHT_METHOD)
         except (OSError, sqlite3.Error):
             pass
         if not fresh:
@@ -207,7 +213,9 @@ def index_is_current(source, index):
     try:
         with _connection(index) as connection:
             metadata = _metadata(connection)
-        return metadata.get("source_mtime_ns") == str(stamp) and metadata.get("source_size") == str(size)
+        return (metadata.get("source_mtime_ns") == str(stamp)
+                and metadata.get("source_size") == str(size)
+                and metadata.get("height_method") == HEIGHT_METHOD)
     except sqlite3.Error:
         return False
 

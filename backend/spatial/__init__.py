@@ -8,6 +8,7 @@ from pathlib import Path
 
 from astral import Observer
 from astral.sun import azimuth, elevation
+from shapely.affinity import translate
 from pyproj import Transformer
 from shapely.geometry import LineString, box, shape
 from shapely.ops import transform, substring
@@ -64,13 +65,19 @@ def route_is_nighttime(coordinates, duration_seconds, departure):
 
 
 def route_metrics(coordinates, duration_seconds, departure):
-    result = {"treeCanopyPercent": None, "buildingShadePercent": None, "sunExposurePercent": None}
+    result = {"treeCanopyPercent": None, "mappedTreeCount": None,
+              "buildingShadePercent": None, "sunExposurePercent": None}
     # UTM 18N is appropriate for this Philadelphia implementation, not worldwide routes.
     if not all(-75.30 <= p["longitude"] <= -74.95 and 39.85 <= p["latitude"] <= 40.15 for p in coordinates):
         return result
     route = transform(PROJECT, LineString([(p["longitude"], p["latitude"]) for p in coordinates]))
     if route.length <= 0:
         return result
+    try:
+        from .trees import count_near_route
+        result["mappedTreeCount"] = count_near_route(route)
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        pass
     canopy_data = layer("tree_canopy.geojson")
     canopy = None
     if canopy_data and canopy_data[0].covers(route):
@@ -83,8 +90,8 @@ def route_metrics(coordinates, duration_seconds, departure):
     building_index = DATA_DIR / "processed" / "buildings.sqlite3"
     if raw_buildings.is_file():
         try:
-            from .buildings import index_is_current, query, read_metadata
-            if not index_is_current(raw_buildings, building_index):
+            from .buildings import ensure_index, query, read_metadata
+            if ensure_index(raw_buildings, building_index) is None:
                 return result
             metadata = read_metadata(building_index)
             coverage_bounds = json.loads(metadata["coverage"])
@@ -113,12 +120,21 @@ def route_metrics(coordinates, duration_seconds, departure):
                 corridor = piece.buffer(max_reach + 1)
                 if not coverage.covers(corridor):
                     return result
-                _, nearby = query(building_index, corridor.bounds)
-                relevant = [(geometry, height) for geometry, height in nearby if geometry.distance(piece) <= max_reach]
-                if any(height is None for _, height in relevant):
-                    return result
-                shadows = [building_shadow(geometry, height, azimuth(observer, arrival), altitude)
-                           for geometry, height in relevant]
+                sun_azimuth = azimuth(observer, arrival)
+                sun_x = math.sin(math.radians(sun_azimuth)) * max_reach
+                sun_y = math.cos(math.radians(sun_azimuth)) * max_reach
+                # A building can shade this route segment only from the sun-facing
+                # corridor. Restrict candidates to that swept area instead of the
+                # much larger circle around the route.
+                source_corridor = piece.union(translate(piece, xoff=sun_x, yoff=sun_y)).convex_hull.buffer(10)
+                _, nearby = query(building_index, source_corridor.bounds)
+                relevant = [(geometry, height) for geometry, height in nearby
+                            if height is not None and geometry.intersects(source_corridor)]
+                shadows = []
+                for geometry, height in relevant:
+                    shadow = building_shadow(geometry, height, sun_azimuth, altitude)
+                    if shadow.intersects(piece):
+                        shadows.append(shadow)
                 shaded = covered_percent(piece, shadows) or 0
                 shade_length += piece.length * shaded / 100
                 exposed_length += piece.length * (100 - shaded) / 100

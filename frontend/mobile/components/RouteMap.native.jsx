@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
-import { ROUTE_COLORS, DARK_ROUTE_COLORS } from "../src/services/routing";
+import { WebView } from "react-native-webview";
+import { createLeafletMapHtml } from "./leafletMapHtml";
 
 export default function RouteMap({
   start,
@@ -12,82 +12,41 @@ export default function RouteMap({
   isDark,
 }) {
   const mapRef = useRef(null);
-
-  const routeColors = isDark
-    ? DARK_ROUTE_COLORS
-    : ROUTE_COLORS;
+  const [mapReady, setMapReady] = useState(false);
+  const html = useMemo(() => createLeafletMapHtml({
+    center: [start.latitude, start.longitude],
+    start,
+    end,
+    routes,
+    isDark,
+  }), [start, end, routes, isDark]);
 
   useEffect(() => {
-    const allCoordinates = [
-      start,
-      end,
-      ...routes.flatMap((route) => route.coordinates),
-    ].filter(
-      (point) =>
-        Number.isFinite(point?.latitude) &&
-        Number.isFinite(point?.longitude)
-    );
-
-    if (allCoordinates.length < 2) return;
-
-    const timeout = setTimeout(() => {
-      mapRef.current?.fitToCoordinates(allCoordinates, {
-        edgePadding: {
-          top: 80,
-          right: 55,
-          bottom: 80,
-          left: 55,
-        },
-        animated: true,
-      });
-    }, 350);
-
-    return () => clearTimeout(timeout);
-  }, [start, end, routes]);
+    if (!mapReady) return;
+    const selected = JSON.stringify(selectedRoute);
+    mapRef.current?.injectJavaScript(`window.setSelectedRoute(${selected}); true;`);
+  }, [mapReady, selectedRoute]);
 
   return (
-    <MapView
+    <WebView
       ref={mapRef}
+      source={{ html, baseUrl: "https://localhost" }}
+      originWhitelist={["*"]}
+      javaScriptEnabled
+      domStorageEnabled
+      bounces={false}
       style={styles.map}
-      initialRegion={{
-        latitude: start.latitude,
-        longitude: start.longitude,
-        latitudeDelta: 0.025,
-        longitudeDelta: 0.025,
+      onLoadStart={() => setMapReady(false)}
+      onMessage={(event) => {
+        try {
+          const message = JSON.parse(event.nativeEvent.data);
+          if (message.type === "map-ready") setMapReady(true);
+          if (message.type === "select-route") onSelectRoute(message.id);
+        } catch {
+          // Ignore messages that are not part of the map bridge.
+        }
       }}
-      userInterfaceStyle={isDark ? "dark" : "light"}
-      showsUserLocation
-      showsMyLocationButton
-    >
-      {routes.map((route, index) => {
-        const isSelected = selectedRoute === route.id;
-        const baseColor = routeColors[index % routeColors.length];
-
-        return (
-          <Polyline
-            key={route.id}
-            coordinates={route.coordinates}
-            strokeColor={isSelected ? baseColor : baseColor + "A6"}
-            strokeWidth={isSelected ? 8 : 5}
-            zIndex={isSelected ? 100 : index + 1}
-            tappable
-            onPress={() => onSelectRoute(route.id)}
-          />
-        );
-      })}
-
-      <Marker
-        coordinate={start}
-        title="Starting location"
-        pinColor="#277A59"
-      />
-
-      <Marker
-        coordinate={end}
-        title="Destination"
-        pinColor="#D65D4A"
-      />
-    </MapView>
+    />
   );
 }
 
