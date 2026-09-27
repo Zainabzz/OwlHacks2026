@@ -319,9 +319,9 @@ export default function RouteWeatherLegend({
 
               {activeRoute.metricContext && (
                 <Text style={[styles.notice, { color: theme.textSecondary }]}>
-                  Weather: starting-point model · {activeRoute.metricContext.weatherTime || "unavailable"} UTC.
+                  Weather: starting-point conditions · {activeRoute.metricContext.weatherTime || "unavailable"} UTC.
                   {"\n"}Area AQI: {activeRoute.metricContext.airQualityTime || "unavailable"} UTC. Sidewalk ice conditions unavailable.
-                  {"\n"}Weather: Open-Meteo. Air quality: CAMS via Open-Meteo.
+                  {"\n"}Weather: {activeRoute.metricContext.weatherSource === "openWeather" ? "OpenWeather" : activeRoute.metricContext.weatherSource === "openMeteo" ? "Open-Meteo" : "unavailable"}. Air quality: CAMS via Open-Meteo.
                 </Text>
               )}
               <Text

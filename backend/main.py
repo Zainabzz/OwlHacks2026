@@ -11,36 +11,33 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+if __package__:
+    from .services.weather import get_weather
+else:
+    from services.weather import get_weather
 
 load_dotenv(Path(__file__).with_name(".env"))
 app = FastAPI(title="OwlRoute API")
-# Development only. Restrict origins before deployment.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 MAPBOX_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
-
 
 class Point(BaseModel):
     latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
     longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
 
-
 class RouteRequest(BaseModel):
     start: Point
     destination: Point
 
-
 def spatial_metrics(coordinates, duration, departure):
-    # Optional spatial packages/data must not prevent basic routing from starting.
     if __package__:
         from .spatial import route_metrics
     else:
         from spatial import route_metrics
     return route_metrics(coordinates, duration, departure)
 
-
 def number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
-
 
 async def mapbox_get(client, path, params):
     if not MAPBOX_TOKEN:
@@ -53,14 +50,12 @@ async def mapbox_get(client, path, params):
             raise ValueError("Invalid response")
         return data
     except (httpx.HTTPError, ValueError) as exc:
-        # Never return upstream request URLs: they contain the access token.
         raise HTTPException(502, "Mapbox is unavailable or rejected the request. Please try again.") from exc
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
 
 @app.get("/api/search/suggest")
 async def suggest_places(
@@ -81,7 +76,6 @@ async def suggest_places(
         if isinstance(item, dict) and item.get("mapbox_id")
     ]}
 
-
 @app.get("/api/search/retrieve")
 async def retrieve_place(session_token: UUID, id: str = Query(min_length=1, max_length=512)):
     async with httpx.AsyncClient(timeout=15) as client:
@@ -96,10 +90,9 @@ async def retrieve_place(session_token: UUID, id: str = Query(min_length=1, max_
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise HTTPException(502, "The selected place has no usable coordinates") from exc
 
-
-async def fetch_conditions(client, point, air_quality=False):
-    url = "https://air-quality-api.open-meteo.com/v1/air-quality" if air_quality else "https://api.open-meteo.com/v1/forecast"
-    variables = "us_aqi" if air_quality else "temperature_2m,precipitation,rain,snowfall,wind_speed_10m,wind_direction_10m"
+async def fetch_air_quality(client, point):
+    url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+    variables = "us_aqi"
     try:
         response = await client.get(url, params={
             "latitude": point.latitude, "longitude": point.longitude,
@@ -109,9 +102,7 @@ async def fetch_conditions(client, point, air_quality=False):
         current = response.json().get("current", {})
         return current if isinstance(current, dict) else {}
     except (httpx.HTTPError, ValueError, AttributeError):
-        # Optional environmental services must not prevent route selection.
         return {}
-
 
 async def fetch_mapbox_routes(client, start, destination):
     coordinates = f"{start.longitude},{start.latitude};{destination.longitude},{destination.latitude}"
@@ -124,18 +115,17 @@ async def fetch_mapbox_routes(client, start, destination):
         raise HTTPException(502, "Unable to calculate walking routes")
     return result["routes"]
 
-
 @app.post("/api/routes")
 async def calculate_routes(request: RouteRequest):
     async with httpx.AsyncClient(timeout=20) as client:
         mapbox_routes = await fetch_mapbox_routes(client, request.start, request.destination)
         weather, air = await asyncio.gather(
-            fetch_conditions(client, request.start),
-            fetch_conditions(client, request.start, air_quality=True),
+            get_weather(request.start.latitude, request.start.longitude, client),
+            fetch_air_quality(client, request.start),
         ) if mapbox_routes else ({}, {})
 
-    snowfall = number(weather.get("snowfall"))
-    observed_at = weather.get("time")
+    snowfall = number(weather.get("snowfallCm"))
+    observed_at = weather.get("weatherTime")
     snow = None if snowfall is None else f"{snowfall:g} cm snowfall · {observed_at or 'time unavailable'} UTC. Sidewalk ice/clearance unknown."
     routes = []
     generated_at = datetime.now(timezone.utc)
@@ -157,15 +147,15 @@ async def calculate_routes(request: RouteRequest):
             "id": f"route-{index + 1}", "name": f"Route {index + 1}", "coordinates": coordinates,
             "metrics": {
                 "durationMinutes": round(duration / 60, 1) if duration is not None and duration >= 0 else None,
-                "temperatureC": number(weather.get("temperature_2m")),
+                "temperatureC": number(weather.get("temperatureC")),
                 "windImpact": None, "airQualityIndex": number(air.get("us_aqi")), "snowCondition": snow,
                 "sunExposurePercent": None, "treeCanopyPercent": None,
                 "buildingShadePercent": None, "rainExposurePercent": None,
                 **spatial,
             },
             "metricContext": {
-                "weatherScope": "Starting-point modeled conditions",
-                "weatherTime": observed_at, "airQualityScope": "Estimated US AQI for the starting-point area",
+                "weatherScope": "Starting-point weather conditions",
+                "weatherTime": observed_at, "weatherSource": weather.get("source"), "airQualityScope": "Estimated US AQI for the starting-point area",
                 "airQualityTime": air.get("time"), "timezone": "UTC",
                 "spatialQuality": "Estimated from local polygon coverage and flat-roof shadows; unavailable outside verified coverage",
                 "spatialTime": generated_at.isoformat(),
@@ -175,13 +165,21 @@ async def calculate_routes(request: RouteRequest):
     return {
         "routes": routes,
         "weather": {
-            "temperatureC": number(weather.get("temperature_2m")),
-            "precipitationMm": number(weather.get("precipitation")),
-            "rainMm": number(weather.get("rain")), "snowfallCm": snowfall,
-            "windSpeedKmh": number(weather.get("wind_speed_10m")),
-            "windDirectionDegrees": number(weather.get("wind_direction_10m")), "observedAt": observed_at,
+            **weather,
+            "temperatureC": number(weather.get("temperatureC")),
+            "precipitationMm": number(weather.get("precipitationMm")),
+            "rainMm": number(weather.get("rainMm")), "snowfallCm": snowfall,
+            "windSpeedKmh": number(weather.get("windSpeedKmh")),
+            "windDirectionDegrees": number(weather.get("windDirectionDegrees")), "observedAt": observed_at,
         },
         "airQuality": {"usAqi": number(air.get("us_aqi")), "observedAt": air.get("time")},
         "generatedAt": generated_at.isoformat(),
-        "weatherScope": "Starting-point modeled conditions",
+        "weatherScope": "Starting-point weather conditions",
     }
+
+@app.get("/api/weather")
+async def weather(
+    latitude: float = Query(ge=-90, le=90, allow_inf_nan=False),
+    longitude: float = Query(ge=-180, le=180, allow_inf_nan=False),
+):
+    return await get_weather(latitude, longitude)

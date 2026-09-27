@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, StatusBar, SafeAreaView, Platform, Keyboard } from "react-native";
 import * as Location from "expo-location";
 import { router } from "expo-router";
@@ -12,6 +12,8 @@ export default function App() {
   const [selectedDestination, setSelectedDestination] = useState(null);
   const [navigationError, setNavigationError] = useState("");
   const [location, setLocation] = useState(null);
+  const startEdited = useRef(false);
+  const [deviceLocation, setDeviceLocation] = useState(null);
   const [locationError, setLocationError] = useState("");
 
   const theme = isDark ? colors.dark : colors.light;
@@ -26,7 +28,7 @@ export default function App() {
         if (cancelled) return;
         if (status !== "granted") {
           setLocationError(
-            "Location permission denied. Enable location access to find routes from your position."
+            "Location permission denied. Search for a starting location instead."
           );
           return;
         }
@@ -37,15 +39,17 @@ export default function App() {
           });
 
         if (cancelled) return;
-        setLocation({
+        const point = {
           name: "Current location",
           latitude: current.coords.latitude,
           longitude: current.coords.longitude,
-        });
+        };
+        setDeviceLocation(point);
+        if (!startEdited.current) setLocation(point);
       } catch {
         if (cancelled) return;
         setLocationError(
-          "Unable to get your location. Enable location access and reload to try again."
+          "Unable to get your location. Search for a starting location instead."
         );
       }
     }
@@ -62,7 +66,7 @@ export default function App() {
       return;
     }
     if (!location) {
-      setNavigationError("Your current location is required. Enable location access and try again.");
+      setNavigationError("Select a starting location from the search results first.");
       return;
     }
     setNavigationError("");
@@ -124,7 +128,25 @@ export default function App() {
         ]}
       >
         <DestinationSearch
-          location={location}
+          value={location}
+          location={deviceLocation || selectedDestination}
+          label="Starting location"
+          placeholder="Search starting address or place"
+          theme={theme}
+          onSelect={place => {
+            startEdited.current = true;
+            setLocation(place);
+            setNavigationError("");
+          }}
+        />
+        {deviceLocation && <TouchableOpacity
+          onPress={() => { startEdited.current = true; setLocation({ ...deviceLocation }); setNavigationError(""); }}
+          accessibilityRole="button" style={{ paddingVertical: 8, marginBottom: 8 }}>
+          <Text style={{ color: theme.primary }}>Use current location</Text>
+        </TouchableOpacity>}
+        <DestinationSearch
+          value={selectedDestination}
+          location={location || deviceLocation}
           theme={theme}
           onSelect={place => { setSelectedDestination(place); setNavigationError(""); }}
           onSubmit={handleNavigation}

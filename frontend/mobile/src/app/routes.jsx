@@ -2,17 +2,18 @@ import React, { useEffect, useMemo, useState} from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   Keyboard,
   ScrollView,
 } from "react-native";
+import { fetchWeather } from "../services/weather";
 import RouteWeatherLegend from "../../components/RouteWeatherLegend";
 import { useLocalSearchParams, router } from "expo-router";
 import * as Location from "expo-location";
 
+import DestinationSearch from "../../components/DestinationSearch";
 import RouteMap from "../../components/RouteMap";
 import { colors } from "../../constants/colors";
 
@@ -57,14 +58,6 @@ export default function RoutesScreen() {
   const [start, setStart] = useState(initialStart);
   const [end, setEnd] = useState(initialEnd);
 
-  const [startText, setStartText] = useState(
-    initialStart?.name || "Starting location"
-  );
-
-  const [endText, setEndText] = useState(
-    initialEnd?.name || "Destination"
-  );
-
   const [isDark, setIsDark] = useState(
     params.theme === "dark"
   );
@@ -76,6 +69,23 @@ export default function RoutesScreen() {
   const [error, setError] = useState("");
   const [isDemo, setIsDemo] = useState(false);
 
+  const [weatherState, setWeatherState] = useState(null);
+  const weatherKey = isValidPoint(start) ? `${start.latitude},${start.longitude}` : null;
+  const weather = weatherState?.key === weatherKey ? weatherState.data : null;
+  const weatherError = weatherState?.key === weatherKey ? weatherState.error : "";
+
+  useEffect(() => {
+    if (!weatherKey) return;
+    let cancelled = false;
+    const [latitude, longitude] = weatherKey.split(",").map(Number);
+    fetchWeather(latitude, longitude).then(data => {
+      if (!cancelled) setWeatherState({ key: weatherKey, data, error: "" });
+    }).catch(err => {
+      if (!cancelled) setWeatherState({ key: weatherKey, data: null, error: err.message });
+    });
+    return () => { cancelled = true; };
+  }, [weatherKey]);
+
   const theme = isDark ? colors.dark : colors.light;
 
   useEffect(() => {
@@ -86,6 +96,11 @@ export default function RoutesScreen() {
       setError("");
       setSelectedRoute(null);
       setRoutes([]);
+
+      if (!isValidPoint(start) || !isValidPoint(end)) {
+        setLoading(false);
+        return;
+      }
 
       try {
         const result = await getRoutes(start, end);
@@ -120,43 +135,8 @@ export default function RoutesScreen() {
     setStart(end);
     setEnd(start);
 
-    setStartText(endText);
-    setEndText(startText);
 
     setSelectedRoute(null);
-  };
-
-  const updateLocation = (type, text) => {
-    // Accept coordinates in the format:
-    // latitude, longitude
-    const parts = text.split(",").map(Number);
-
-    if (
-      parts.length !== 2 ||
-      text.split(",").some(part => !part.trim()) ||
-      !parts.every(Number.isFinite) ||
-      Math.abs(parts[0]) > 90 ||
-      Math.abs(parts[1]) > 180
-    ) {
-      setError(
-        "Enter coordinates as latitude, longitude. Address search will be connected next."
-      );
-      return;
-    }
-
-    const location = {
-      name: text,
-      latitude: parts[0],
-      longitude: parts[1],
-    };
-
-    setError("");
-
-    if (type === "start") {
-      setStart(location);
-    } else {
-      setEnd(location);
-    }
   };
 
   const useCurrentLocation = async () => {
@@ -180,7 +160,6 @@ export default function RoutesScreen() {
       };
 
       setStart(current);
-      setStartText(current.name);
       setError("");
     } catch {
       setError("Unable to retrieve your current location.");
@@ -257,23 +236,15 @@ export default function RoutesScreen() {
             ]}
           />
 
-          <TextInput
-            value={startText}
-            onChangeText={setStartText}
-            onSubmitEditing={() =>
-              updateLocation("start", startText)
-            }
-            placeholder="Starting location"
-            placeholderTextColor={theme.textSecondary}
-            style={[
-              styles.locationInput,
-              { color: theme.text },
-            ]}
-            returnKeyType="done"
-          />
+          <View style={styles.locationFields}>
+            <DestinationSearch value={start} location={end} theme={theme}
+              label="Starting location" placeholder="Address or place"
+              onSelect={setStart} />
+          </View>
 
           <TouchableOpacity
             onPress={useCurrentLocation}
+            accessibilityLabel="Use current location"
             style={styles.currentLocationButton}
           >
             <Text
@@ -299,25 +270,17 @@ export default function RoutesScreen() {
             <View style={styles.locationRow}>
               <View style={styles.endDot} />
 
-              <TextInput
-                value={endText}
-                onChangeText={setEndText}
-                onSubmitEditing={() =>
-                  updateLocation("end", endText)
-                }
-                placeholder="Destination"
-                placeholderTextColor={theme.textSecondary}
-                style={[
-                  styles.locationInput,
-                  { color: theme.text },
-                ]}
-                returnKeyType="done"
-              />
+              <View style={styles.locationFields}>
+                <DestinationSearch value={end} location={start} theme={theme}
+                  label="Destination" placeholder="Address or place"
+                  onSelect={setEnd} />
+              </View>
             </View>
           </View>
 
           <TouchableOpacity
             onPress={swapLocations}
+            disabled={!start || !end}
             style={[
               styles.swapButton,
               {
@@ -404,6 +367,20 @@ export default function RoutesScreen() {
             nestedScrollEnabled
             contentContainerStyle={styles.legendScroll}
           >
+            <View style={{ padding: 16, marginBottom: 12, borderRadius: 16, backgroundColor: theme.surface }}>
+              <Text style={{ color: theme.text, fontWeight: "700", marginBottom: 8 }}>Weather at your starting point</Text>
+              {!!weatherError && <Text accessibilityRole="alert" style={{ color: theme.text }}>{weatherError}</Text>}
+              {!weatherKey && <Text style={{ color: theme.textSecondary }}>Choose a starting location.</Text>}
+              {weatherKey && !weather && !weatherError && <ActivityIndicator color={theme.primary} />}
+              {weather && Object.entries(weather.providers).map(([id, provider]) => (
+                <View key={id} style={{ marginVertical: 6 }}>
+                  <Text style={{ color: theme.text }}>
+                    {provider.name}: {provider.status === "ok" ? `${provider.data.temperatureF}°F (${provider.data.temperatureC}°C)` : provider.error}
+                  </Text>
+                  {provider.status === "ok" && <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{provider.data.weatherTime || "Time unavailable"} · UTC</Text>}
+                </View>
+              ))}
+            </View>
             <RouteWeatherLegend
               routes={routes}
               selectedRoute={selectedRoute}

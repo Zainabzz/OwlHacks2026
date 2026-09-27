@@ -2,14 +2,32 @@ import { useEffect, useRef, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from "react-native";
 import { createSearchSession, suggestPlaces, retrievePlace } from "../src/services/search";
 
-export default function DestinationSearch({ location, theme, onSelect, onSubmit }) {
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState(false);
+export default function DestinationSearch({ location, theme, onSelect, onSubmit, value = null, label = "Destination", placeholder = "Where are you going?" }) {
+  const [query, setQuery] = useState(value?.name || "");
+  const [selected, setSelected] = useState(Boolean(value));
   const [suggestions, setSuggestions] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [session, setSession] = useState(createSearchSession);
   const generation = useRef(0);
+
+  const [previousValue, setPreviousValue] = useState(value);
+  // Preserve a draft when editing clears the parent's resolved coordinates.
+  // External selections (GPS/swap) replace the draft before rendering children.
+  if (value !== previousValue) {
+    setPreviousValue(value);
+    if (value) {
+      setQuery(value.name || `${value.latitude}, ${value.longitude}`);
+      setSelected(true);
+      setSuggestions([]);
+      setBusy(false);
+      setError("");
+    }
+  }
+
+  useEffect(() => {
+    if (value) generation.current += 1;
+  }, [value]);
 
   useEffect(() => {
     if (selected || query.trim().length < 2) return;
@@ -47,6 +65,8 @@ export default function DestinationSearch({ location, theme, onSelect, onSubmit 
   const selectPlace = async suggestion => {
     const version = ++generation.current;
     setBusy(true);
+    setSelected(true);
+    setSuggestions([]);
     setError("");
     try {
       const place = await retrievePlace(suggestion.id, session);
@@ -56,7 +76,7 @@ export default function DestinationSearch({ location, theme, onSelect, onSubmit 
       setSuggestions([]);
       onSelect(place);
     } catch (err) {
-      if (version === generation.current) setError(err.message);
+      if (version === generation.current) setError(`${err.message} Edit the search to try again.`);
     } finally {
       if (version === generation.current) {
         setBusy(false);
@@ -66,16 +86,23 @@ export default function DestinationSearch({ location, theme, onSelect, onSubmit 
   };
 
   return (
-    <View>
+    <View style={{ flexShrink: 1 }}>
+      <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{label}</Text>
       <TextInput
         value={query}
         onChangeText={changeQuery}
-        placeholder="Where are you going?"
+        placeholder={placeholder}
         placeholderTextColor={theme.textSecondary}
         style={[styles.input, { color: theme.text }]}
-        accessibilityLabel="Search destination"
+        accessibilityLabel={`Search ${label.toLowerCase()}`}
+        autoCorrect={false}
+        selectTextOnFocus
         returnKeyType="search"
-        onSubmitEditing={onSubmit}
+        onSubmitEditing={() => {
+          if (value) onSubmit?.();
+          else if (!busy && suggestions.length === 1) selectPlace(suggestions[0]);
+          else setError("Choose a place from the results below.");
+        }}
       />
       {busy && <ActivityIndicator color={theme.primary} accessibilityLabel="Searching places" />}
       {!!error && <Text accessibilityRole="alert" style={{ color: theme.textSecondary, marginBottom: 10 }}>{error}</Text>}

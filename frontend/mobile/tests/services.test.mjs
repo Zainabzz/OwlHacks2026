@@ -49,3 +49,23 @@ test('search resolves a selection through a separate retrieval call using the sa
   const results = await suggestPlaces('Market', token, start);
   assert.deepEqual(await retrievePlace(results[0].id, token), { ...end, name: 'Market' });
 });
+
+test('weather uses backend coordinates and preserves both provider statuses', async () => {
+  const { fetchWeather } = await import('../src/services/weather.js');
+  const data = { status: 'ok', source: 'openMeteo', providers: {
+    openMeteo: { status: 'ok', data: { temperatureC: 20 } },
+    openWeather: { status: 'unavailable', error: 'API key rejected' },
+  } };
+  globalThis.fetch = async url => {
+    const parsed = new URL(url);
+    assert.equal(parsed.pathname, '/api/weather');
+    assert.equal(parsed.searchParams.get('latitude'), String(start.latitude));
+    assert.equal(parsed.searchParams.get('longitude'), String(start.longitude));
+    assert.equal(parsed.searchParams.has('appid'), false);
+    return { ok: true, json: async () => data };
+  };
+  assert.deepEqual(await fetchWeather(start.latitude, start.longitude), data);
+  await assert.rejects(fetchWeather(91, 0), /valid location/);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
+  await assert.rejects(fetchWeather(start.latitude, start.longitude), /invalid weather/);
+});

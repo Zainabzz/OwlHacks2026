@@ -21,3 +21,9 @@ Run isolated API/spatial tests (no provider credentials or live API calls requir
 ```sh
 python -m unittest discover -s backend/tests -v
 ```
+
+Weather uses two providers in parallel: keyless Open-Meteo and OpenWeather Current Weather (`/data/2.5/weather`). Configure `OPENWEATHER_API` in `backend/.env` (the alias `OPENWEATHER_API_KEY` is also accepted), then restart Uvicorn. No provider key belongs in the frontend environment.
+
+`GET /api/weather?latitude=39.9496&longitude=-75.1719` returns separate `providers.openMeteo` and `providers.openWeather` entries with status, normalized data, and sanitized errors. Open-Meteo is the preferred source; OpenWeather is the fallback. One failed provider does not discard the other. The route API uses the same weather service. The route screen shows both providers and their timestamps.
+
+Both providers are requested in metric units; Fahrenheit/inch/mph fields are converted explicitly. OpenWeather's snow water equivalent remains separate from Open-Meteo's snowfall depth. An authentication failure means the configured key/account access needs attention; raw provider responses and key-bearing URLs are never returned to the browser.
