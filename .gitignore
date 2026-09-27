@@ -1,4 +1,14 @@
 backend/.env
 backend/.venv/
 __pycache__/
+backend/data/processed/
 frontend/mobile/.env
+
+# Downloaded Philadelphia geospatial datasets
+backend/data/raw/*
+!backend/data/raw/buildings/
+backend/data/raw/buildings/*
+!backend/data/raw/buildings/README.md
+!backend/data/raw/trees/
+backend/data/raw/trees/*
+!backend/data/raw/trees/ppr_tree_inventory_2025.geojson

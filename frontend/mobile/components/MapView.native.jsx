@@ -1,33 +1,27 @@
-import MapView, { Marker } from "react-native-maps";
+import { useMemo } from "react";
 import { StyleSheet } from "react-native";
+import { WebView } from "react-native-webview";
+import { createLeafletMapHtml } from "./leafletMapHtml";
 
-export default function NavigationMap({
-  location,
-  isDark,
-}) {
+export default function NavigationMap({ location, isDark }) {
+  const latitude = location?.latitude ?? 39.9526;
+  const longitude = location?.longitude ?? -75.1636;
+  const html = useMemo(() => createLeafletMapHtml({
+    center: [latitude, longitude],
+    zoom: 14,
+    isDark,
+    start: location,
+  }), [latitude, longitude, isDark, location]);
+
   return (
-    <MapView
+    <WebView
+      source={{ html, baseUrl: "https://localhost" }}
+      originWhitelist={["*"]}
+      javaScriptEnabled
+      domStorageEnabled
+      bounces={false}
       style={styles.map}
-      initialRegion={{
-        latitude: location?.latitude ?? 39.9526,
-        longitude: location?.longitude ?? -75.1636,
-        latitudeDelta: 0.025,
-        longitudeDelta: 0.025,
-      }}
-      showsUserLocation={true}
-      showsMyLocationButton={true}
-      userInterfaceStyle={isDark ? "dark" : "light"}
-    >
-      {location && (
-        <Marker
-          coordinate={{
-            latitude: location.latitude,
-            longitude: location.longitude,
-          }}
-          title="Your location"
-        />
-      )}
-    </MapView>
+    />
   );
 }
 

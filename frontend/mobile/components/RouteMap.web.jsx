@@ -1,7 +1,8 @@
 import React from "react";
-import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { ROUTE_COLORS, DARK_ROUTE_COLORS} from "../src/services/routing";
+import { formatDuration } from "../src/services/formatting";
 
 function FitRoutes({ start, end, routes }) {
   const map = useMap();
@@ -26,6 +27,22 @@ function FitRoutes({ start, end, routes }) {
   }, [map, start, end, routes]);
 
   return null;
+}
+
+function RouteLine({ route, color, isSelected, isPreferred, onSelectRoute }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (isSelected) ref.current?.bringToFront();
+  }, [isSelected]);
+  return (
+    <Polyline ref={ref} positions={route.coordinates.map(point => [point.latitude, point.longitude])}
+      pathOptions={{ color, weight: isSelected ? 8 : 5, opacity: isSelected ? 1 : .65, lineJoin: "round", lineCap: "round" }}
+      eventHandlers={{ click: () => onSelectRoute(route.id) }}>
+      <Tooltip sticky>
+        {route.name}{isPreferred ? " (Preferred)" : ""}{Number.isFinite(route.metrics?.durationMinutes) ? ` · ${formatDuration(route.metrics.durationMinutes)}` : ""}{Number.isFinite(route.metrics?.distanceMiles) ? ` · ${route.metrics.distanceMiles.toFixed(2)} mi` : ""}
+      </Tooltip>
+    </Polyline>
+  );
 }
 
 export default function RouteMap({
@@ -60,24 +77,15 @@ export default function RouteMap({
         routes={routes}
       />
 
-      {routes.map((route, index) => (
-        <Polyline
-          key={route.id}
-          positions={route.coordinates.map((point) => [
-            point.latitude,
-            point.longitude,
-          ])}
-          pathOptions={{
-            color: routeColors[index],
-            weight:
-              selectedRoute === route.id ? 8 : 5,
-            opacity: 0.95,
-          }}
-          eventHandlers={{
-            click: () => onSelectRoute(route.id),
-          }}
-        />
-      ))}
+      {routes.map((route, index) => ({ route, index }))
+        .sort((a, b) => Number(a.route.id === selectedRoute) - Number(b.route.id === selectedRoute))
+        .map(({ route, index }) => (
+          <RouteLine key={route.id} route={route}
+            color={routeColors[index % routeColors.length]}
+            isSelected={selectedRoute === route.id}
+            isPreferred={route.isPreferred ?? (index === 0)}
+            onSelectRoute={onSelectRoute} />
+        ))}
 
       <CircleMarker
         center={[start.latitude, start.longitude]}

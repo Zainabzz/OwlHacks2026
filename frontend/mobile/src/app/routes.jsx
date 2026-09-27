@@ -8,7 +8,6 @@ import {
   Keyboard,
   ScrollView,
 } from "react-native";
-import { fetchWeather } from "../services/weather";
 import RouteWeatherLegend from "../../components/RouteWeatherLegend";
 import { useLocalSearchParams, router } from "expo-router";
 import * as Location from "expo-location";
@@ -68,23 +67,6 @@ export default function RoutesScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [isDemo, setIsDemo] = useState(false);
-
-  const [weatherState, setWeatherState] = useState(null);
-  const weatherKey = isValidPoint(start) ? `${start.latitude},${start.longitude}` : null;
-  const weather = weatherState?.key === weatherKey ? weatherState.data : null;
-  const weatherError = weatherState?.key === weatherKey ? weatherState.error : "";
-
-  useEffect(() => {
-    if (!weatherKey) return;
-    let cancelled = false;
-    const [latitude, longitude] = weatherKey.split(",").map(Number);
-    fetchWeather(latitude, longitude).then(data => {
-      if (!cancelled) setWeatherState({ key: weatherKey, data, error: "" });
-    }).catch(err => {
-      if (!cancelled) setWeatherState({ key: weatherKey, data: null, error: err.message });
-    });
-    return () => { cancelled = true; };
-  }, [weatherKey]);
 
   const theme = isDark ? colors.dark : colors.light;
 
@@ -363,25 +345,11 @@ export default function RoutesScreen() {
           ]}
         >
           <ScrollView
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-            contentContainerStyle={styles.legendScroll}
-          >
-            <View style={{ padding: 16, marginBottom: 12, borderRadius: 16, backgroundColor: theme.surface }}>
-              <Text style={{ color: theme.text, fontWeight: "700", marginBottom: 8 }}>Weather at your starting point</Text>
-              {!!weatherError && <Text accessibilityRole="alert" style={{ color: theme.text }}>{weatherError}</Text>}
-              {!weatherKey && <Text style={{ color: theme.textSecondary }}>Choose a starting location.</Text>}
-              {weatherKey && !weather && !weatherError && <ActivityIndicator color={theme.primary} />}
-              {weather && Object.entries(weather.providers).map(([id, provider]) => (
-                <View key={id} style={{ marginVertical: 6 }}>
-                  <Text style={{ color: theme.text }}>
-                    {provider.name}: {provider.status === "ok" ? `${provider.data.temperatureF}°F (${provider.data.temperatureC}°C)` : provider.error}
-                  </Text>
-                  {provider.status === "ok" && <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{provider.data.weatherTime || "Time unavailable"} · UTC</Text>}
-                </View>
-              ))}
-            </View>
-            <RouteWeatherLegend
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+          contentContainerStyle={styles.legendScroll}
+        >
+          <RouteWeatherLegend
               routes={routes}
               selectedRoute={selectedRoute}
               onSelectRoute={setSelectedRoute}
